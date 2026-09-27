@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="勾選行程條件，自動列出這趟該帶的安全與醫療用品。登山安全課程教材。">
+<meta name="color-scheme" content="light dark">
+<title>上山前的安全清單</title>
+</head>
+<body>
+<!--
+  上山前的安全清單　—　單一檔案，無建置步驟，可直接放上 GitHub Pages。
+
+  怎麼增刪品項：往下找到 var ITEMS 陣列，照現有格式加一行。
+    g    分類名稱（同名的會歸在一起）
+    n    品項名稱
+    w    出現條件，空陣列 [] 代表連半日步道都要帶；
+         可用的條件：fullday 整日以上／overnight 過夜／
+         altitude 在 2500 公尺以上過夜／fastclimb 高山短程或高山單日範本自動設定／
+         cold 低溫／water 涉水／longevac 撤離超過 24 小時／
+         allergy 有嚴重過敏史／diabetes 有糖尿病用藥／specialrx 醫師已開立特殊備用藥
+    rx   true 代表處方藥，會標紅字
+    note 補充說明，可省略
+
+  ── w:[] 這一層要特別克制 ──
+  它是最小清單（目前 4 項），只放半日步道也該帶的東西。
+  要放進來之前，先問兩個問題：
+    1. 不帶的話，現場有沒有替代品？
+       水泡貼可以用 OK 繃頂替、快速糖分可以用行動糧頂替、抗組織胺可以用冰敷頂替，
+       三者都因此被移出最小清單。抗組織胺另一個理由是它只緩解皮膚症狀、起效要 1 至 2 小時，
+       對過敏性休克沒有用——那要靠腎上腺素。
+    2. 在一小時內就能走回登山口的情境下，沒有它會不會改變結果？
+  兩題都是「沒有替代、會改變結果」才留在 w:[]。
+  最小清單如果不合理，使用者會連整份都不看——這是整份工具可信度的關鍵。
+
+  ── 三層的分界 ──
+    w:[]            半日步道也要帶
+    ["fullday"]     整日往返。判準是「可能天黑前下不來、可能得在山上等救援」，
+                    所以頭燈、行動電源、離線地圖、保暖層、急救毯都在這一層
+    ["overnight"]   真的過夜才需要，例如備用乾衣物、個人衛生用品
+  另有依個人狀況觸發的品項（allergy／diabetes／specialrx），不分行程長短都會出現。
+
+  fullday 與 overnight 不是是非題，而是「半日／整日／過夜」三段模式鈕（見 MODES、buildSeg）。
+
+  問題的前後關係：在 TRIP 或 PERSON 的某一題加 dep 或 depNot，
+  條件不符時該題會自動隱藏，並把自己的勾選強制關掉。
+    dep:"fullday"                  前提成立才問。例如「撤離超過 24 小時」在整日以上行程才詢問
+    dep:"overnight"                例如「是否在 2500 公尺以上過夜」只在過夜時出現
+    dep:["altitude","fastclimb"]   一組前提，任一成立即問。例如「曾罹患高海拔肺水腫」
+                                   只在這趟真的會上高海拔時才問
+    depNot:["altitude"]            已被別題涵蓋就不問，避免重複。例如「單日上到 2500 以上」
+                                   在睡眠海拔已達 2500 時就沒有意義了
+  要新增條件問題：在 TRIP 或 PERSON 陣列加一筆，並在 LABEL 補上顯示名稱。
+  要新增行程範本：在 PRESETS 陣列加一筆，on 列出該範本要打開的條件。
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@700&display=swap">
+<style>
+  :root{
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  img{max-width:100%}
+  [hidden]{display:none !important}
+  :root{
+    color-scheme: light;
+    --ink:#11252c;
+    --ink-2:#4a6068;
+    --ink-3:#7d9098;
+    --paper:#f6f8f7;
+    --card:#ffffff;
+    --line:#dbe4e2;
+    --line-2:#c6d3d0;
+    --ridge:#1c6e7d;
+    --ridge-soft:#e4f0f1;
+    --forest:#2f6f4e;
+    --forest-soft:#e6f0ea;
+    --ochre:#bf5b2a;
+    --ochre-soft:#f8ece5;
+    --shadow:0 1px 2px rgba(17,37,44,.06), 0 8px 20px -12px rgba(17,37,44,.18);
+    --serif:"Noto Serif TC", "Songti TC", serif;
+    --sans:"Noto Sans TC", -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      color-scheme: dark;
+      --ink:#e8efee; --ink-2:#a3b6ba; --ink-3:#78898f;
+      --paper:#0d1b20; --card:#142830; --line:#25404a; --line-2:#2f4e59;
+      --ridge:#5fb6c4; --ridge-soft:#15343c;
+      --forest:#6fb98c; --forest-soft:#14322a;
+      --ochre:#e08a5a; --ochre-soft:#33211a;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 20px -12px rgba(0,0,0,.6);
+    }
+  }
+  :root[data-theme="dark"]{
+    color-scheme: dark;
+    --ink:#e8efee; --ink-2:#a3b6ba; --ink-3:#78898f;
+    --paper:#0d1b20; --card:#142830; --line:#25404a; --line-2:#2f4e59;
+    --ridge:#5fb6c4; --ridge-soft:#15343c;
+    --forest:#6fb98c; --forest-soft:#14322a;
+    --ochre:#e08a5a; --ochre-soft:#33211a;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 20px -12px rgba(0,0,0,.6);
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:var(--sans); font-size:16px; line-height:1.65;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1080px; margin:0 auto; padding-inline:16px; padding-block:28px 132px}
+
+  header h1{
+    font-family:var(--serif); font-weight:700; font-size:clamp(28px,5.2vw,40px);
+    line-height:1.2; margin:0 0 6px; text-wrap:balance; letter-spacing:.01em;
+  }
+  header p.lede{margin:0; color:var(--ink-2); max-width:56ch}
+  .rule{height:2px; background:var(--ridge); margin:18px 0 26px; border-radius:2px; opacity:.85}
+
+  h2{
+    font-family:var(--sans); font-size:12px; font-weight:700; letter-spacing:.14em;
+    text-transform:uppercase; color:var(--ink-3); margin:0 0 12px;
+  }
+  h2 .zh{letter-spacing:.06em; font-size:13px}
+
+  .layout{display:grid; gap:26px; grid-template-columns:1fr}
+  @media (min-width:900px){
+    .layout{grid-template-columns:376px 1fr; gap:32px; align-items:start}
+    .panel{position:sticky; top:calc(env(safe-area-inset-top,0px) + 18px)}
+  }
+
+  .card{
+    background:var(--card); border:1px solid var(--line); border-radius:10px;
+    box-shadow:var(--shadow); padding:18px;
+  }
+  .card + .card{margin-top:16px}
+
+  /* 行程範本 */
+  .presets{display:flex; flex-wrap:wrap; gap:8px}
+  .preset{
+    font:inherit; font-size:14px; font-weight:500; cursor:pointer;
+    background:var(--paper); color:var(--ink); border:1px solid var(--line-2);
+    border-radius:999px; padding:7px 14px; transition:background .13s, border-color .13s;
+  }
+  .preset:hover{background:var(--ridge-soft); border-color:var(--ridge)}
+  .preset[aria-pressed="true"]{background:var(--ridge); border-color:var(--ridge); color:#fff}
+  .preset:focus-visible{outline:2px solid var(--ridge); outline-offset:2px}
+
+  /* 條件開關 */
+  .qgroup{display:flex; flex-direction:column; gap:2px; margin-top:4px}
+  .q{
+    display:flex; align-items:flex-start; gap:12px; padding:11px 10px;
+    border-radius:8px; cursor:pointer; transition:background .13s;
+  }
+  .q:hover{background:var(--ridge-soft)}
+  .q[hidden]{display:none !important}
+  .q input{
+    appearance:none; flex:0 0 auto; width:22px; height:22px; margin:2px 0 0;
+    border:1.5px solid var(--line-2); border-radius:6px; background:var(--card);
+    cursor:pointer; position:relative; transition:background .13s, border-color .13s;
+  }
+  .q input:checked{background:var(--ridge); border-color:var(--ridge)}
+  .q input:checked::after{
+    content:""; position:absolute; left:7px; top:3px; width:5px; height:10px;
+    border:solid #fff; border-width:0 2px 2px 0; transform:rotate(43deg);
+  }
+  .q input:focus-visible{outline:2px solid var(--ridge); outline-offset:2px}
+  .q .qt{font-size:15.5px; line-height:1.5}
+  .q .qh{display:block; font-size:13px; color:var(--ink-3); line-height:1.5}
+
+  .seg{
+    display:grid; grid-template-columns:repeat(3, 1fr); gap:4px; margin:2px 0 10px;
+    background:var(--paper); border:1px solid var(--line); border-radius:9px; padding:4px;
+  }
+  .segb{
+    font:inherit; font-size:14.5px; font-weight:500; cursor:pointer;
+    background:transparent; color:var(--ink-2); border:0; border-radius:6px;
+    padding:9px 6px; transition:background .13s, color .13s;
+  }
+  .segb:hover{color:var(--ink)}
+  .segb[aria-pressed="true"]{background:var(--ridge); color:#fff; font-weight:700}
+  .segb:focus-visible{outline:2px solid var(--ridge); outline-offset:2px}
+
+  .divider{height:1px; background:var(--line); margin:14px 0}
+
+  /* 清單 */
+  .sectionhead{
+    margin:28px 0 10px; padding:14px 16px; border-radius:9px;
+    background:var(--ridge-soft); border:1px solid var(--line);
+  }
+  .sectionhead:first-child{margin-top:0}
+  .sectionhead strong{display:block; font-family:var(--serif); font-size:21px; line-height:1.35}
+  .sectionhead span{display:block; margin-top:3px; font-size:13.5px; color:var(--ink-2); line-height:1.55}
+
+  .grouphead{
+    display:flex; align-items:baseline; gap:10px; margin:22px 0 8px;
+    padding-bottom:6px; border-bottom:1px solid var(--line);
+  }
+  .grouphead:first-of-type{margin-top:0}
+  .grouphead h3{
+    font-family:var(--serif); font-size:19px; font-weight:700; margin:0; color:var(--ink);
+  }
+  .grouphead .cnt{font-size:13px; color:var(--ink-3); font-variant-numeric:tabular-nums}
+
+  ul.items{list-style:none; margin:0; padding:0}
+  li.item{
+    display:flex; align-items:flex-start; gap:12px;
+    padding:10px 8px; border-radius:8px; cursor:pointer;
+  }
+  li.item:hover{background:var(--ridge-soft)}
+  li.item input{
+    appearance:none; flex:0 0 auto; width:21px; height:21px; margin:2px 0 0;
+    border:1.5px solid var(--line-2); border-radius:5px; background:var(--card);
+    cursor:pointer; position:relative;
+  }
+  li.item input:checked{background:var(--forest); border-color:var(--forest)}
+  li.item input:checked::after{
+    content:""; position:absolute; left:6.5px; top:2.5px; width:5px; height:10px;
+    border:solid #fff; border-width:0 2px 2px 0; transform:rotate(43deg);
+  }
+  li.item input:focus-visible{outline:2px solid var(--ridge); outline-offset:2px}
+  li.item .body{min-width:0; flex:1}
+  li.item .nm{font-size:16px; line-height:1.5}
+  li.item input:checked ~ .body .nm{color:var(--ink-3); text-decoration:line-through}
+  li.item .note{display:block; font-size:13.5px; color:var(--ink-2); line-height:1.55; margin-top:1px}
+  .tags{display:flex; flex-wrap:wrap; gap:5px; margin-top:5px}
+  .tag{
+    font-size:11.5px; font-weight:500; letter-spacing:.03em;
+    padding:2px 8px; border-radius:999px; white-space:nowrap;
+    background:var(--ridge-soft); color:var(--ridge);
+  }
+  .tag.core{background:var(--forest-soft); color:var(--forest)}
+  .tag.rx{background:var(--ochre-soft); color:var(--ochre)}
+
+  li.item.off{opacity:.5}
+  li.item.off .nm{text-decoration:none}
+
+  .showoff{
+    display:flex; align-items:center; gap:9px; margin-top:22px;
+    font-size:14px; color:var(--ink-2); cursor:pointer;
+  }
+  .showoff input{
+    appearance:none; width:18px; height:18px; border:1.5px solid var(--line-2);
+    border-radius:4px; background:var(--card); position:relative; cursor:pointer; margin:0;
+  }
+  .showoff input:checked{background:var(--ink-3); border-color:var(--ink-3)}
+  .showoff input:checked::after{
+    content:""; position:absolute; left:5.5px; top:2px; width:4px; height:9px;
+    border:solid var(--card); border-width:0 2px 2px 0; transform:rotate(43deg);
+  }
+
+  /* 底部進度 */
+  .bar{
+    position:fixed; left:0; right:0; bottom:0; z-index:5;
+    background:var(--card); border-top:1px solid var(--line);
+    padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));
+    box-shadow:0 -6px 20px -14px rgba(17,37,44,.4);
+  }
+  .bar-in{
+    max-width:1080px; margin:0 auto; display:flex; align-items:center;
+    gap:12px; flex-wrap:nowrap;
+  }
+  .bar .lbl{white-space:nowrap}
+  .bar .n{font-family:var(--serif); font-size:26px; line-height:1; font-variant-numeric:tabular-nums}
+  .bar .lbl{font-size:14px; color:var(--ink-2)}
+  .track{flex:1 1 80px; height:7px; background:var(--line); border-radius:99px; overflow:hidden; min-width:48px}
+  .fill{height:100%; width:0%; background:var(--forest); border-radius:99px; transition:width .25s ease}
+  .reset{
+    font:inherit; font-size:13.5px; color:var(--ink-2); background:none;
+    border:1px solid var(--line-2); border-radius:7px; padding:5px 11px; cursor:pointer;
+    white-space:nowrap; flex:0 0 auto;
+  }
+  .reset:hover{border-color:var(--ridge); color:var(--ridge)}
+  .reset:focus-visible{outline:2px solid var(--ridge); outline-offset:2px}
+
+  footer.src{margin-top:34px; padding-top:16px; border-top:1px solid var(--line)}
+  footer.src p{margin:0 0 8px; font-size:13px; color:var(--ink-3); line-height:1.7; max-width:74ch}
+  footer.src strong{color:var(--ink-2)}
+
+  .legend{
+    margin:0 0 18px; padding-bottom:14px; border-bottom:1px solid var(--line);
+    font-size:13.5px; color:var(--ink-2); line-height:1.6;
+  }
+  .hint{
+    margin:14px 0 0; padding:12px 14px; border-radius:8px;
+    background:var(--forest-soft); color:var(--ink); font-size:14px; line-height:1.6;
+  }
+  .hint b{color:var(--forest)}
+  .hint-examples{display:block; margin-top:7px; color:var(--ink-2)}
+  .hint-note{display:block; margin-top:2px; color:var(--ink-3); font-size:12.5px}
+  .redflags{
+    margin:0 0 18px; padding:14px 16px; border-radius:9px;
+    background:var(--ochre-soft); border:1px solid color-mix(in srgb, var(--ochre) 38%, var(--line));
+  }
+  .redflags strong{display:block; margin-bottom:6px; color:var(--ochre); font-size:14px}
+  .redflags p{margin:0 0 7px; font-size:13.5px; color:var(--ink-2); line-height:1.6}
+  .redflags ul{margin:0; padding-left:20px; color:var(--ink-2); font-size:13.5px; line-height:1.65}
+  .redflags li+li{margin-top:2px}
+
+  @media (max-width:420px){
+    .wrap{padding-inline:12px; padding-top:20px; padding-bottom:112px}
+    .card{padding:15px}
+    .presets{gap:6px}
+    .preset{font-size:13.5px; padding:6px 11px}
+    .seg{gap:3px}
+    .segb{font-size:14px; padding:8px 4px}
+    .q{gap:10px; padding:10px 6px}
+    .q .qt{font-size:15px}
+    li.item{gap:10px; padding:9px 4px}
+    li.item .nm{font-size:15.5px}
+    li.item .note{font-size:13px}
+    .bar{padding:9px 12px calc(9px + env(safe-area-inset-bottom,0px))}
+    .bar-in{gap:8px}
+    .bar .n{font-size:22px}
+    .bar .lbl{font-size:12.5px}
+    .track{display:none}
+    .reset{font-size:12.5px; padding:5px 8px}
+  }
+
+  @media (prefers-reduced-motion: reduce){*{transition:none !important}}
+  @media print{
+    .panel, .bar, .showoff, .preset{display:none !important}
+    body{background:#fff}
+    .card{box-shadow:none; border:none; padding:0}
+    .layout{display:block}
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>上山前的安全清單</h1>
+    <p class="lede">先回答這趟行程的幾個事實，清單會自己算出你該帶什麼。</p>
+  </header>
+  <div class="rule"></div>
+
+  <div class="layout">
+    <div class="panel">
+      <section class="card">
+        <h2><span class="zh">行程範本</span></h2>
+        <div class="presets" id="presets"></div>
+        <p class="hint" id="hint"><b>半日步道不需要背一整袋。</b>清單會跟著行程縮到最小——決定內容的是時間長短、高度、上升速度與撤離難度，不是山的名字。</p>
+      </section>
+
+      <section class="card">
+        <h2><span class="zh">這趟行程</span></h2>
+        <div class="seg" id="seg" role="group" aria-label="行程型態">
+          <button type="button" class="segb" data-mode="half">半日</button>
+          <button type="button" class="segb" data-mode="full">單日</button>
+          <button type="button" class="segb" data-mode="night">過夜</button>
+        </div>
+        <div class="qgroup" id="trip"></div>
+        <div class="divider"></div>
+        <h2><span class="zh">我的狀況</span></h2>
+        <div class="qgroup" id="person"></div>
+      </section>
+    </div>
+
+    <div>
+      <section class="card">
+        <p class="hint"><b>安全提醒：</b>醫藥包主要用來處理輕症與提供初步協助；若症狀明顯惡化，重點會轉成停止行程、下降或求救。</p>
+        <p class="legend">清單分成「我的醫藥包」與「另外要確認的安全裝備」。沒有條件標籤的品項，每一趟都會出現；有標籤的則依行程與個人狀況加入。處方藥項目代表「若醫師已評估並開立，可依原本指示準備」。</p>
+        <aside class="redflags" aria-label="需要停止行程或求救的情況">
+          <strong>遇到這些情況，醫藥包只是輔助</strong>
+          <p>先停止行程並聯絡 119 或其他可用的救援管道；現場能做的急救可同步進行。</p>
+          <ul>
+            <li>大量出血，持續加壓仍無法控制</li>
+            <li>失去意識，或沒有正常呼吸</li>
+            <li>嚴重呼吸困難、喉嚨腫、暈厥或疑似嚴重過敏</li>
+            <li>高海拔症狀持續惡化、走路不穩，或休息時也明顯喘</li>
+            <li>高熱合併意識改變，或疑似嚴重失溫並出現意識改變</li>
+            <li>溺水、雷擊或其他重大外傷</li>
+          </ul>
+        </aside>
+        <div id="list"></div>
+        <label class="showoff">
+          <input type="checkbox" id="showoff">
+          <span>顯示這趟不需要的品項</span>
+        </label>
+      </section>
+
+      <footer class="src">
+        <p><strong>處方藥以醫師事先評估與開立的內容為準。</strong>若有重要病史、藥物過敏或固定用藥，可在行前和醫師確認攜帶方式與使用時機。</p>
+        <p>本表是行前整理工具，不是官方標準清單。實際攜帶內容可依行程長度、天候、隊伍人數與個人健康狀況調整。</p>
+      </footer>
+    </div>
+  </div>
+</div>
+
+<div class="bar">
+  <div class="bar-in">
+    <span class="n" id="done">0</span>
+    <span class="lbl">／ <span id="total">0</span> 項已打包</span>
+    <span class="track"><span class="fill" id="fill"></span></span>
+    <button class="reset" id="reset" type="button">清除勾選</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var TRIP = [
+    {k:"altitude",  q:"這趟會在 2,500 公尺以上過夜嗎？", h:"以實際住宿的山屋或紮營地高度為準", dep:"overnight"},
+    {k:"cold",      q:"會遇到低溫或雪季嗎？", h:"含高海拔的清晨與夜間"},
+    {k:"heat",      q:"會在高溫或悶熱下行走嗎？", h:"悶熱、無風或曝曬環境都可能增加熱傷害風險"},
+    {k:"water",     q:"需要涉水或溯溪嗎？", h:"渡溪、取水滑落也算"},
+    {k:"bugs",      q:"會經過草叢、密林或蚊蟲較多的環境嗎？", h:"草叢、林地、潮濕環境或蚊蟲較多的季節都算"},
+    {k:"multiday",  q:"全程三天以上嗎？", h:"耗材與藥量要按天數加，而且越長越可能被天候困住", dep:"overnight"},
+    {k:"longevac",  q:"發生事故後，撤離到醫院可能超過 24 小時嗎？", h:"長縱走、偏遠路線、無路徑、溯溪、隊伍人力不足或救援受天候限制", dep:"fullday"}
+  ];
+  var PERSON = [
+    {k:"allergy", q:"曾發生嚴重過敏？", h:"若醫師已開立腎上腺素注射筆，這趟要一起帶"},
+    {k:"diabetes", q:"有使用可能造成低血糖的糖尿病藥物或胰島素嗎？", h:"帶平常使用的低血糖處置與血糖監測用品"},
+    {k:"specialrx", q:"醫師已為這趟行程開立特殊備用藥嗎？", h:"例如高山症急救藥、肺水腫預防藥或偏遠行程備用藥；只帶醫師已開立並教過使用方式者", dep:["altitude","fastclimb","longevac","multiday"]}
+  ];
+  var LABEL = {
+    overnight:"過夜", fullday:"整日以上", altitude:"高海拔", diabetes:"糖尿病用藥", fastclimb:"單日高海拔", cold:"低溫", water:"涉水",
+    longevac:"長撤離", allergy:"過敏史", specialrx:"醫師已開立", heat:"高溫", bugs:"草叢／蚊蟲", multiday:"三天以上"
+  };
+
+  var ITEMS = [
+    {g:"外傷與衛生", n:"拋棄式手套（至少 2 副）", w:["fullday"], note:"止血與傷口處置前先防護"},
+    {g:"外傷與衛生", n:"紗布、無菌敷料", w:["fullday"]},
+    {g:"外傷與衛生", n:"防水敷料、OK 繃", w:[], note:"短程時也能先擋住磨擦點"},
+    {g:"外傷與衛生", n:"抗生素藥膏", w:["fullday"]},
+    {g:"外傷與衛生", n:"小剪刀、透氣膠帶", w:["fullday"]},
+    {g:"外傷與衛生", n:"乾洗手或酒精棉片", w:["fullday"]},
+    {g:"外傷與衛生", n:"水泡貼、人工皮、防磨貼布", w:["fullday"], note:"水泡是登山最常見的傷，而且會讓人走不動"},
+    {g:"外傷與衛生", n:"鑷子", w:["fullday"], note:"取異物、拔刺，以及移除叮在皮膚上的蜱"},
+    {g:"外傷與衛生", n:"彈性繃帶", w:["fullday"], note:"扭傷後還要自己走回登山口"},
+    {g:"外傷與衛生", n:"三角巾（選配）", w:["longevac"], note:"可用於固定與懸吊；熟悉替代固定方式者不一定要另外帶"},
+    {g:"外傷與衛生", n:"敷料加倍", w:["longevac","multiday"], note:"天數長或撤離久，換藥都不只一次"},
+    {g:"外傷與衛生", n:"沖洗用針筒", w:["longevac","water"], note:"以大量可飲用水沖洗；明顯污染的傷口可充分沖洗，未處理溪水不適合作為首選"},
+    {g:"外傷與衛生", n:"固定材料（長撤離時選配）", w:["longevac"], note:"可利用登山杖、睡墊與衣物固定；有受過訓練再考慮專用夾板"},
+
+    {g:"內科用藥", n:"個人長期處方藥", w:[], rx:true, note:"足量攜帶，並分開存放。包含你平常就會用到的藥，例如過敏性鼻炎的抗組織胺"},
+    {g:"內科用藥", n:"止痛藥", w:[], note:"以自己平常可安全使用的種類為主。高海拔若頭痛持續加重，或合併噁心、頭暈、走路不穩，可視為高山症警訊，考慮停止上升、下降或求救"},
+    {g:"內科用藥", n:"抗組織胺", w:["fullday","allergy"], note:"可用於過敏性鼻炎與皮膚搔癢。較不嗜睡的種類通常更適合登山；會嗜睡的藥可能影響判斷與步行安全。嚴重過敏仍需依醫囑使用腎上腺素並求救"},
+    {g:"內科用藥", n:"快速糖分", w:["diabetes"], note:"依平常的低血糖處置方式準備，並讓同行者知道放在哪裡。意識不清或無法吞嚥時不適合口服食物或飲料"},
+    {g:"內科用藥", n:"平常使用的血糖監測用品與備品", w:["diabetes"], note:"例如血糖機、試紙、CGM 相關備品；以平常的糖尿病照護方式準備"},
+    {g:"內科用藥", n:"暈車藥", w:["fullday"], note:"依藥品標示或原本使用方式準備。部分藥物會嗜睡；高海拔出現頭痛、噁心時，也要留意是否可能與高山症有關"},
+    {g:"內科用藥", n:"止吐藥", w:["multiday","altitude","fastclimb"], note:"以自己熟悉使用方式的種類為主。高海拔若反覆嘔吐、喝不下水或症狀惡化，仍以停止上升、下降或求救為主"},
+    {g:"內科用藥", n:"止瀉藥", w:["multiday","longevac"], note:"補液通常比止瀉本身更重要。若有血便、明顯發燒或劇烈腹痛，建議停止行程並尋求醫療評估"},
+    {g:"內科用藥", n:"處方藥多備兩天份", w:["longevac","multiday"], rx:true, note:"可多準備約兩天份，以因應天候、路況或撤離延誤"},
+
+    {g:"叮咬與過敏", n:"止癢藥膏（蚊蟲叮咬後選配）", w:["bugs"], note:"用於蚊蟲叮咬後的局部紅腫、搔癢。可選平常熟悉、且標示適用於蚊蟲咬傷或皮膚搔癢的外用藥；抓破或有傷口時，含類固醇藥膏不宜直接塗在傷口上。若出現全身性蕁麻疹、喉嚨腫、呼吸困難或暈厥，屬於需要緊急處理的情況"},
+    {g:"叮咬與過敏", n:"腎上腺素注射筆", w:["allergy"], rx:true, note:"曾有嚴重過敏者可依醫囑攜帶，並讓同行者知道放置位置與使用方式。若出現呼吸困難、喉嚨腫或休克症狀，使用後仍需儘快求救"},
+
+    {g:"高海拔", n:"若醫師評估需要：Acetazolamide（丹木斯）", w:["altitude","fastclimb"], rx:true, note:"可在行前和醫師討論是否需要、何時開始使用，以及過敏史與其他疾病。首次使用較適合安排在可觀察反應的情境"},
+    {g:"高海拔", n:"血氧機（選配）", w:["altitude","fastclimb"], note:"可用來看趨勢，但高山症主要仍看症狀；數字看起來正常也不能排除高山症"},
+    {g:"高海拔", n:"醫師已為本次行程開立的特殊備用藥", w:["specialrx"], rx:true, note:"以醫師事先開立、並已說明使用時機與方式的藥品為主；此清單不作為自行購藥或調整用藥的依據"},
+
+    {g:"補水與保暖", n:"電解質補充包或含鹽食物", w:["heat"], note:"炎熱或大量流汗時可搭配補充；飲水以實際需要為主，避免短時間大量飲水"},
+    {g:"補水與保暖", n:"保暖層（含手套與帽子）", w:["fullday","cold"]},
+    {g:"補水與保暖", n:"備用乾衣物", w:["overnight","water","cold"], note:"濕衣物會明顯增加散熱，尤其遇到低溫和強風時。過夜或可能弄濕的行程，準備一套乾燥衣物"},
+    {g:"補水與保暖", n:"急救毯或保溫毯", w:["fullday","cold"], note:"等待救援時，保暖排在水與食物之前"},
+    {g:"補水與保暖", n:"個人衛生用品", w:["overnight"], note:"含女性生理用品"},
+    {g:"補水與保暖", n:"可沾濕的頭巾或快乾毛巾", w:["heat"], note:"降溫靠蒸發。淋濕加上搧風，比把水喝下去或局部冰敷都快"},
+    {g:"補水與保暖", n:"額外的水（比平常多帶）", w:["heat"], note:"熱傷害幾乎都伴隨脫水。行程中就要計畫在哪裡補水"},
+    {g:"補水與保暖", n:"暖暖包（選配）", w:["cold"], note:"避免長時間直接貼在感覺較差的皮膚上，以降低低溫燙傷風險"},
+    {g:"補水與保暖", n:"保溫瓶與熱飲（選配）", w:["cold"]},
+    {g:"補水與保暖", n:"乾燥的備用手套", w:["cold"], note:"凍傷以預防為主"},
+
+    {g:"防護裝備", n:"防蟲劑或長袖衣物", w:["bugs"], note:"草叢、密林或蚊蟲較多時，優先減少皮膚暴露；若使用防蟲劑，依產品標示使用"},
+    {g:"防護裝備", n:"側面有遮蔽的太陽眼鏡", w:["altitude","fastclimb","cold"], note:"雪地反射最強，陰天與濃霧同樣要戴"},
+    {g:"防護裝備", n:"防曬（顧及鼻下與耳後）", w:["altitude","fastclimb","cold","heat"], note:"反射光會從下方照上來"},
+    {g:"防護裝備", n:"遮陽帽或遮頸布", w:["heat"], note:"曬傷會讓皮膚散熱變差，等於墊高後面的熱傷害風險"},
+
+    {g:"導航、通訊與證件", n:"哨子", w:["fullday"], note:"沒電也能用的求救工具。玉管處列為必備"},
+    {g:"導航、通訊與證件", n:"健保卡、保險與緊急聯絡資訊", w:[], note:"可一併放上重要病史、過敏與平常用藥等必要醫療資訊，並做好防水收納。緊急聯絡人也應事先知道這趟去哪裡、預計何時回來"},
+    {g:"導航、通訊與證件", n:"頭燈與備用電池", w:["fullday"], note:"可因應行程延誤、天黑或需要處置傷患的情況"},
+    {g:"導航、通訊與證件", n:"行動電源", w:["fullday"], note:"手機沒電就無法通報"},
+    {g:"導航、通訊與證件", n:"離線地圖與座標紀錄工具", w:["fullday"], note:"求救時可提供位置或座標；若使用座標，建議確認裝置採用 WGS84"},
+    {g:"導航、通訊與證件", n:"備用通訊（衛星通訊器或無線電）", w:["longevac"]}
+  ];
+
+  var PRESETS = [
+    {name:"半日步道", on:[], hide:[], examples:"七星山主東峰、象山、劍潭山", hint:"<b>短程也要留基本安全底線。</b>清單只保留真的需要隨身帶的核心用品。"},
+    {name:"單日郊山／中級山", on:["fullday"], hide:["longevac"], examples:"加里山、北插天山、鳶嘴稍來", hint:"<b>單日行程要把延誤算進去。</b>除了基本醫藥包，也要確認頭燈、保暖、導航與電力。"},
+    {name:"高山短程（2,500 公尺以上）", on:["fastclimb"], hide:[], examples:"合歡主峰、石門山、合歡尖山", hint:"<b>路程短不代表沒有高海拔風險。</b>若是搭車快速抵達高處再步行，仍要留意頭痛、噁心、頭暈等症狀。"},
+    {name:"高山單日", on:["fullday","fastclimb"], hide:["longevac"], examples:"合歡北峰、合歡北峰＋西峰、玉山前峰", hint:"<b>高海拔單日行程要同時考慮高度與延誤。</b>即使當天往返，也可把高山症、天黑與體力下降納入準備。"},
+    {name:"一般過夜登山", on:["fullday","overnight"], hide:["altitude","multiday"], examples:"松羅湖、加羅湖、水漾森林", hint:"<b>過夜行程要多想一晚。</b>除了白天會用到的用品，也要確認乾燥衣物、個人衛生與夜間保暖。"},
+    {name:"高山過夜", on:["fullday","overnight","altitude"], hide:["altitude","multiday"], examples:"玉山主峰兩天一夜、雪山主東兩天一夜、奇萊南華兩天一夜", hint:"<b>高海拔過夜的重點是適應、保暖與辨認症狀。</b>若症狀持續惡化，處理重點會轉成停止上升、下降或求救。"},
+    {name:"三天以上行程", on:["fullday","overnight","multiday"], hide:["multiday"], examples:"嘉明湖三天兩夜、北大武山三天兩夜、能高越嶺", hint:"<b>天數一拉長，耗材與備援要跟著增加。</b>這類行程的住宿高度差異很大，請再依實際行程勾選高海拔與長撤離。"},
+    {name:"長縱走／多日探勘", on:["fullday","overnight","multiday","longevac"], hide:["multiday","longevac"], examples:"南二段、馬博橫斷、能高安東軍", hint:"<b>長縱走與多日探勘先想撤離。</b>通訊、備援、藥量與耗材要把受傷、天候與路況造成的延誤一起算進去。"},
+    {name:"雪季高山過夜", on:["fullday","overnight","altitude","cold"], hide:["altitude","cold","heat","multiday"], examples:"雪山主峰雪季、玉山主峰雪季、南湖大山雪季", hint:"<b>雪季高山以保暖、乾燥與防風為核心。</b>可優先確認衣物、手套與備援保暖裝備是否足夠。"}
+  ];
+
+  /* 範本可能包含不直接顯示成問題的條件（例如 fastclimb），因此獨立維護。 */
+  var PRESET_COND_KEYS = ["fullday","overnight","altitude","fastclimb","cold","heat","water","bugs","multiday","longevac"];
+
+  var KEY = "pack-v3";
+  var state = {cond:{}, packed:{}, showoff:false, preset:""};
+
+  function load(){
+    try{
+      var raw = localStorage.getItem(KEY);
+      if(raw){
+        var o = JSON.parse(raw);
+        if(o && typeof o === "object"){
+          state.cond = o.cond || {};
+          state.packed = o.packed || {};
+          state.showoff = !!o.showoff;
+          state.preset = o.preset || "";
+        }
+      }
+    }catch(e){}
+  }
+  function save(){
+    try{ localStorage.setItem(KEY, JSON.stringify(state)); }catch(e){}
+  }
+
+  function included(it){
+    if(it.w.length === 0) return true;
+    for(var i=0;i<it.w.length;i++){ if(state.cond[it.w[i]]) return true; }
+    return false;
+  }
+
+  var el = function(id){ return document.getElementById(id); };
+
+  /* ---- 條件 ---- */
+  function buildQuestions(host, defs){
+    defs.forEach(function(d){
+      var lab = document.createElement("label");
+      lab.className = "q";
+      lab.id = "q-" + d.k;
+      lab.setAttribute("for", "c-" + d.k);
+      var inp = document.createElement("input");
+      inp.type = "checkbox"; inp.id = "c-" + d.k;
+      inp.checked = !!state.cond[d.k];
+      inp.addEventListener("change", function(){
+        state.cond[d.k] = inp.checked;
+        render(); save();
+      });
+      var sp = document.createElement("span");
+      sp.className = "qt";
+      sp.appendChild(document.createTextNode(d.q));
+      var h = document.createElement("span");
+      h.className = "qh"; h.textContent = d.h;
+      sp.appendChild(h);
+      lab.appendChild(inp); lab.appendChild(sp);
+      host.appendChild(lab);
+    });
+  }
+
+  /* ---- 範本 ---- */
+  function buildPresets(){
+    var host = el("presets");
+    PRESETS.forEach(function(p){
+      var b = document.createElement("button");
+      b.type = "button"; b.className = "preset"; b.textContent = p.name;
+      b.setAttribute("aria-pressed", "false");
+      b.addEventListener("click", function(){
+        state.preset = p.name;
+        PRESET_COND_KEYS.forEach(function(k){ state.cond[k] = p.on.indexOf(k) >= 0; });
+        TRIP.forEach(function(t){
+          var i = el("c-" + t.k); if(i) i.checked = !!state.cond[t.k];
+        });
+        render(); save();
+      });
+      host.appendChild(b);
+    });
+  }
+
+  function exactPreset(){
+    var cur = PRESET_COND_KEYS.filter(function(k){ return state.cond[k]; }).sort().join(",");
+    for(var i=0;i<PRESETS.length;i++){
+      if(PRESETS[i].on.slice().sort().join(",") === cur) return PRESETS[i];
+    }
+    return null;
+  }
+
+  function activePreset(){
+    if(state.preset){
+      for(var i=0;i<PRESETS.length;i++){
+        if(PRESETS[i].name === state.preset) return PRESETS[i];
+      }
+    }
+    return exactPreset();
+  }
+
+  function syncPresets(){
+    var btns = el("presets").children;
+    var matched = activePreset();
+    for(var i=0;i<btns.length;i++){
+      btns[i].setAttribute("aria-pressed", matched && PRESETS[i].name === matched.name ? "true" : "false");
+    }
+  }
+
+  function syncHint(){
+    var matched = activePreset();
+    if(matched){
+      el("hint").innerHTML = matched.hint +
+        '<span class="hint-examples"><b>代表行程：</b>' + matched.examples +
+        '。<span class="hint-note">代表行程僅供選擇範本，仍請依實際天數、住宿高度、天候與撤離條件調整。</span></span>';
+      return;
+    }
+    if(state.cond.overnight){
+      el("hint").innerHTML = "<b>依你勾選的條件調整過夜清單。</b>除了基本醫藥包，也要確認夜間保暖、乾燥、電力與撤離備援。";
+    }else if(state.cond.fullday){
+      el("hint").innerHTML = "<b>依你勾選的條件調整單日清單。</b>把可能延誤、天黑與臨時撤離一起算進準備。";
+    }else{
+      el("hint").innerHTML = "<b>短程也要留基本安全底線。</b>清單只保留真的需要隨身帶的核心用品。";
+    }
+  }
+
+  /* ---- 單日／過夜 模式 ---- */
+  var MODES = {
+    half:  {fullday:false, overnight:false},
+    full:  {fullday:true,  overnight:false},
+    night: {fullday:true,  overnight:true}
+  };
+  function currentMode(){
+    if(state.cond.overnight) return "night";
+    return state.cond.fullday ? "full" : "half";
+  }
+  function buildSeg(){
+    var btns = el("seg").querySelectorAll(".segb");
+    Array.prototype.forEach.call(btns, function(b){
+      b.addEventListener("click", function(){
+        var m = MODES[b.getAttribute("data-mode")];
+        state.preset = "";
+        state.cond.fullday = m.fullday;
+        state.cond.overnight = m.overnight;
+        render(); save();
+      });
+    });
+  }
+  function syncSeg(){
+    var cur = currentMode();
+    var btns = el("seg").querySelectorAll(".segb");
+    Array.prototype.forEach.call(btns, function(b){
+      b.setAttribute("aria-pressed", b.getAttribute("data-mode") === cur ? "true" : "false");
+    });
+  }
+
+  /* 前提不成立、或已被上一題涵蓋的問題就不該出現：隱藏該題，並強制關掉
+     dep    單一條件代號或一組代號，其中任一成立才顯示
+     depNot 一組代號，其中任一成立就隱藏（避免問重複的事） */
+  function arr(v){ return (typeof v === "string") ? [v] : (v || []); }
+  function syncDeps(){
+    var preset = activePreset();
+    var presetHide = preset && preset.hide ? preset.hide : [];
+
+    TRIP.concat(PERSON).forEach(function(d){
+      var show = true;
+      if(d.dep){
+        show = arr(d.dep).some(function(k){ return !!state.cond[k]; });
+      }
+      if(show && d.depNot){
+        show = !arr(d.depNot).some(function(k){ return !!state.cond[k]; });
+      }
+
+      /* 範本本身已經決定答案的題目不再重複詢問。
+         若該條件是範本預設為 true，只隱藏題目、不把條件關掉。 */
+      var hiddenByPreset = presetHide.indexOf(d.k) >= 0;
+      if(hiddenByPreset) show = false;
+
+      var row = el("q-" + d.k);
+      if(row) row.hidden = !show;
+
+      var presetKeepsCondition = hiddenByPreset && preset && preset.on.indexOf(d.k) >= 0;
+      if(!show && state.cond[d.k] && !presetKeepsCondition){
+        state.cond[d.k] = false;
+        var i = el("c-" + d.k);
+        if(i) i.checked = false;
+      }
+    });
+  }
+
+  /* ---- 清單 ---- */
+  function render(){
+    syncSeg();
+    syncDeps();
+    var host = el("list");
+    host.textContent = "";
+    var groups = [];
+    ITEMS.forEach(function(it){ if(groups.indexOf(it.g) < 0) groups.push(it.g); });
+
+    var total = 0, done = 0;
+    var currentSection = "";
+    var medicalGroups = ["外傷與衛生","內科用藥","叮咬與過敏","高海拔"];
+
+    groups.forEach(function(g){
+      var rows = ITEMS.filter(function(it){ return it.g === g; });
+      var shown = rows.filter(function(it){ return included(it) || state.showoff; });
+      if(shown.length === 0) return;
+      var inCount = rows.filter(included).length;
+      if(inCount === 0 && !state.showoff) return;
+
+      var section = medicalGroups.indexOf(g) >= 0 ? "medical" : "safety";
+      if(section !== currentSection){
+        var sh = document.createElement("div");
+        sh.className = "sectionhead";
+        var st = document.createElement("strong");
+        var sd = document.createElement("span");
+        if(section === "medical"){
+          st.textContent = "我的醫藥包";
+          sd.textContent = "以一般登山者能自行安全使用的用品為主；特殊處方藥只帶醫師已開立並教過使用方式者。";
+        }else{
+          st.textContent = "這趟另外要確認的安全裝備";
+          sd.textContent = "不是藥，但會直接影響保暖、補水、導航與求救能力。";
+        }
+        sh.appendChild(st); sh.appendChild(sd); host.appendChild(sh);
+        currentSection = section;
+      }
+
+      var head = document.createElement("div");
+      head.className = "grouphead";
+      var h3 = document.createElement("h3"); h3.textContent = g;
+      var cnt = document.createElement("span"); cnt.className = "cnt";
+      cnt.textContent = inCount + " 項";
+      head.appendChild(h3); head.appendChild(cnt);
+      host.appendChild(head);
+
+      var ul = document.createElement("ul"); ul.className = "items";
+      shown.forEach(function(it){
+        var on = included(it);
+        var id = "i-" + g + "-" + it.n;
+        var li = document.createElement("li");
+        li.className = "item" + (on ? "" : " off");
+
+        var inp = document.createElement("input");
+        inp.type = "checkbox"; inp.id = id;
+        inp.checked = !!state.packed[id];
+        inp.disabled = !on;
+        inp.addEventListener("change", function(){
+          state.packed[id] = inp.checked;
+          tally(); save();
+        });
+
+        var body = document.createElement("div"); body.className = "body";
+        var nm = document.createElement("span"); nm.className = "nm"; nm.textContent = it.n;
+        body.appendChild(nm);
+        if(it.note){
+          var nt = document.createElement("span"); nt.className = "note"; nt.textContent = it.note;
+          body.appendChild(nt);
+        }
+        var tags = document.createElement("div"); tags.className = "tags";
+        if(it.w.length === 0){
+          /* 核心品項不加標籤，避免重複噪音；圖例在清單上方說明 */
+        }else{
+          it.w.forEach(function(k){
+            if(on && !state.cond[k]) return;
+            tags.appendChild(mkTag(LABEL[k], ""));
+          });
+          if(!on){
+            tags.textContent = "";
+            tags.appendChild(mkTag("這趟不需要", ""));
+          }
+        }
+        if(it.rx) tags.appendChild(mkTag("依醫囑", "rx"));
+        body.appendChild(tags);
+
+        li.appendChild(inp); li.appendChild(body);
+        ul.appendChild(li);
+
+        li.addEventListener("click", function(ev){
+          if(ev.target === inp || !on) return;
+          inp.checked = !inp.checked;
+          state.packed[id] = inp.checked;
+          tally(); save();
+        });
+
+        if(on){ total++; if(inp.checked) done++; }
+      });
+      host.appendChild(ul);
+    });
+
+    el("total").textContent = total;
+    el("done").textContent = done;
+    el("fill").style.width = total ? Math.round(done / total * 100) + "%" : "0%";
+    syncPresets();
+    syncHint();
+  }
+
+  function mkTag(text, cls){
+    var s = document.createElement("span");
+    s.className = "tag" + (cls ? " " + cls : "");
+    s.textContent = text;
+    return s;
+  }
+
+  function tally(){
+    var total = 0, done = 0;
+    ITEMS.forEach(function(it){
+      if(!included(it)) return;
+      total++;
+      var id = "i-" + it.g + "-" + it.n;
+      if(state.packed[id]) done++;
+    });
+    el("total").textContent = total;
+    el("done").textContent = done;
+    el("fill").style.width = total ? Math.round(done / total * 100) + "%" : "0%";
+  }
+
+  load();
+  if(Object.keys(state.cond).length === 0){
+    state.cond = {fullday:true, overnight:true, altitude:true};
+  }
+  buildPresets();
+  buildSeg();
+  buildQuestions(el("trip"), TRIP);
+  buildQuestions(el("person"), PERSON);
+  el("showoff").checked = state.showoff;
+  el("showoff").addEventListener("change", function(){
+    state.showoff = el("showoff").checked; render(); save();
+  });
+  el("reset").addEventListener("click", function(){
+    state.packed = {}; render(); save();
+  });
+  render();
+})();
+</script>
+</body>
+</html>
